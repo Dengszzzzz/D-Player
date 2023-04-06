@@ -67,6 +67,14 @@ class MainActivity : AppCompatActivity() {
         player = DPlayer()
         player!!.setSurfaceView(binding.surfaceView)
         player!!.setDataSource(File(path).absolutePath)
+
+
+        // rtmp://58.200.131.2:1935/livetv/hunantv  支持 rtmp
+        //player!!.setDataSource("rtmp://58.200.131.2:1935/livetv/hunantv");
+        // 还不支持 rtsp
+        // rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov
+        // player.setDataSource("rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov");
+
         // 准备成功的回调处    <----  C++ 子线程调用的
         player!!.setOnPreparedListener {
             runOnUiThread { // Toast.makeText(MainActivity.this, "准备成功，即将开始播放", Toast.LENGTH_SHORT).show();
