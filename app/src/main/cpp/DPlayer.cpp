@@ -22,11 +22,11 @@ DPlayer::DPlayer(const char *data_source, JNICallbackHelper *helper) {
 DPlayer::~DPlayer() {
     if (data_source) {
         delete data_source;
-        data_source = 0;
+        data_source = nullptr;
     }
     if (helper){
         delete helper;
-        helper = 0;
+        helper = nullptr;
     }
 }
 
@@ -37,7 +37,7 @@ DPlayer::~DPlayer() {
 void *task_prepare(void *args) {
     auto *player = static_cast<DPlayer *>(args);
     player->prepare_();
-    return 0; //必须返回
+    return nullptr; //必须返回
 }
 
 
@@ -49,10 +49,18 @@ void DPlayer::prepare_() {
      * TODO 第一步：打开媒体地址（文件路径， 直播地址rtmp）
      */
     formatContext = avformat_alloc_context();
-    AVDictionary *dictionary = 0;
-    av_dict_set(&dictionary, "timeout", "5000000", 0);  //单位微秒,设置字典
+    // 字典（键值对）
+    AVDictionary *dictionary = nullptr;
+    //设置超时（5秒）,单位微秒
+    av_dict_set(&dictionary, "timeout", "5000000", 0);
 
-    int r = avformat_open_input(&formatContext, data_source, 0, &dictionary);
+    /**
+     * 1，AVFormatContext *
+     * 2，路径 url:文件路径或直播地址
+     * 3，AVInputFormat *fmt  Mac、Windows 摄像头、麦克风， 我们目前安卓用不到
+     * 4，各种设置：例如：Http 连接超时， 打开rtmp的超时  AVDictionary **options
+     */
+    int r = avformat_open_input(&formatContext, data_source, nullptr, &dictionary);
     //释放字典
     av_dict_free(&dictionary);
     if (r) {  //对于 avformat_open_input 返回0代表Success，这里C的判断是非0即true。所以这里如果r=0不进入方法里，不为0才进入。
@@ -67,7 +75,7 @@ void DPlayer::prepare_() {
     /**
      * TODO 第二步：查找媒体中的音视频流的信息
      */
-    r = avformat_find_stream_info(formatContext, 0);
+    r = avformat_find_stream_info(formatContext, nullptr);
     if (r < 0) {
         // TODO 第一节课作业：JNI 反射回调到Java方法，并提示
         if (helper){
@@ -126,7 +134,7 @@ void DPlayer::prepare_() {
         /**
         * TODO 第九步：打开解码器
         */
-        r = avcodec_open2(codeContext, codec, 0);
+        r = avcodec_open2(codeContext, codec, nullptr);
         if (r) {
             if (helper){
                 helper->onError(THREAD_CHILD, FFMPEG_OPEN_DECODER_FAIL);
@@ -185,22 +193,34 @@ void DPlayer::prepare() {
 void *task_start(void *args){
     auto *player = static_cast<DPlayer*>(args);
     player->start_();
-    return 0;
+    return nullptr;
 }
 
+// TODO 第五节课 内存泄漏关键点（控制packet队列大小，等待队列中的数据被消费） 1
 // 把 视频 音频 的压缩包(AVPacket *) 循环获取出来 加入到队列里面去
 void DPlayer::start_() { //子线程
     while (isPlaying){
+        // 解决方案：视频 我不丢弃数据，等待队列中数据 被消费 内存泄漏点1.1
+        if (video_channel && video_channel->packets.size() > 100){
+            av_usleep(10 * 1000);  // 单位 ：microseconds 微妙 10毫秒
+            continue;
+        }
+        // 解决方案：音频 我不丢弃数据，等待队列中数据 被消费 内存泄漏点1.2
+        if (audio_channel && audio_channel->packets.size() > 100){
+            av_usleep(10 * 1000);
+            continue;
+        }
+
         //AVPacket 可能是音频，也可能是视频（压缩包）
         AVPacket * packet = av_packet_alloc();
         int ret = av_read_frame(formatContext,packet);
         if (!ret){  // ret == 0,代表成功
             // AudioChannel    队列
-            // VideioChannel   队列
+            // VideoChannel   队列
 
             // 把我们的 AVPacket* 加入队列， 音频 和 视频
             /*AudioChannel.insert(packet);
-            VideioChannel.insert(packet);*/
+            VideoChannel.insert(packet);*/
             if (video_channel && video_channel->stream_index == packet->stream_index){
                 //代表视频
                 video_channel->packets.insertToQueue(packet);
@@ -209,12 +229,16 @@ void DPlayer::start_() { //子线程
                 audio_channel->packets.insertToQueue(packet);
             }
         }else if(ret == AVERROR_EOF){  //end of dile == 读到文件末尾了 == AVERROR_EOF
+            // 内存泄漏点1.3
             //TODO 表示读完了，要考虑是否播放完成。  注意：读完了，不代表播放完毕
+            if (video_channel->packets.empty() && audio_channel->packets.empty()){
+                break; // 队列的数据被音频 视频 全部播放完毕了，我在退出
+            }
         }else{
             break;  // av_read_frame 出现了错误，结束当前循环
         }
     }
-    isPlaying = 0;
+    isPlaying = false;
     if (video_channel){
         video_channel->stop();
     }
@@ -224,7 +248,7 @@ void DPlayer::start_() { //子线程
 }
 
 void DPlayer::start() {
-    isPlaying = 1;
+    isPlaying = true;
 
     // 视频：1.解码    2.播放
     // 1.把队列里面的压缩包(AVPacket *)取出来，然后解码成（AVFrame * ）原始包 ----> 保存队列

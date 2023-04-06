@@ -1,13 +1,15 @@
 #ifndef D_PLAYER_BASECHANNEL_H
 #define D_PLAYER_BASECHANNEL_H
 
-extern "C"{
+extern "C" {
 #include <libavcodec/avcodec.h>
-};
+#include <libavutil/time.h>
+}
+
 #include "safe_queue.h"
 #include "log4c.h"
 
-class BaseChannel{
+class BaseChannel {
 public:
     int stream_index;  //音频 or 视频的下标
     SafeQueue<AVPacket *> packets; //压缩数据包
@@ -33,15 +35,15 @@ public:
      * */
     // typedef void (*ReleaseCallback)(T *);
     //FixMe:为什么要static？
-    static void releaseAVPacket(AVPacket ** p){
-        if(p){
+    static void releaseAVPacket(AVPacket **p) {
+        if (p) {
             av_packet_free(p);  // 释放队列里面的 T == AVPacket
             *p = 0;
         }
     }
 
-    static void releaseAVFrame(AVFrame ** f){
-        if(f){
+    static void releaseAVFrame(AVFrame **f) {
+        if (f) {
             av_frame_free(f);  // 释放队列里面的 T == AVFrame
             *f = 0;
         }

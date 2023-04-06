@@ -4,8 +4,8 @@
 
 #include "AudioChannel.h"
 
-AudioChannel::AudioChannel(int streamIndex, AVCodecContext *codecContext) : BaseChannel(streamIndex,
-                                                                                        codecContext) {
+AudioChannel::AudioChannel(int streamIndex, AVCodecContext *codecContext)
+        : BaseChannel(streamIndex, codecContext) {
 
     // 音频三要素
     /*
@@ -35,7 +35,8 @@ AudioChannel::AudioChannel(int streamIndex, AVCodecContext *codecContext) : Base
     // 初始化缓冲区
 
     // AV_SAMPLE_FMT_S16: 位声、采用格式大小，存放大小
-    out_channels = av_get_channel_layout_nb_channels(AV_CH_LAYOUT_STEREO);  //STEREO 双声道类型 == 获取 声道数 2
+    out_channels = av_get_channel_layout_nb_channels(
+            AV_CH_LAYOUT_STEREO);  //STEREO 双声道类型 == 获取 声道数 2
     out_sample_size = av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);  //每个sample是16 bit == 2字节
     out_sample_rate = 44100;  //采样率
 
@@ -44,17 +45,17 @@ AudioChannel::AudioChannel(int streamIndex, AVCodecContext *codecContext) : Base
     out_buffers = static_cast<uint8_t *>(malloc(out_buffers_size)); // 堆区开辟而已
 
     // FFmpeg 音频 重采样  音频重采样上下文 第四个
-    swr_ctx  = swr_alloc_set_opts(0,
+    swr_ctx = swr_alloc_set_opts(nullptr,
             // 下面是输出环节
-                                  AV_CH_LAYOUT_STEREO,  // 声道布局类型 双声道
-                                  AV_SAMPLE_FMT_S16,  // 采样大小 16bit
-                                  out_sample_rate, // 采样率  44100
+                                 AV_CH_LAYOUT_STEREO,  // 声道布局类型 双声道
+                                 AV_SAMPLE_FMT_S16,  // 采样大小 16bit
+                                 out_sample_rate, // 采样率  44100
 
             // 下面是输入环节
-                                  codecContext->channel_layout, // 声道布局类型
-                                  codecContext->sample_fmt, // 采样大小
-                                  codecContext->sample_rate,  // 采样率
-                                  0, 0);
+                                 codecContext->channel_layout, // 声道布局类型
+                                 codecContext->sample_fmt, // 采样大小
+                                 codecContext->sample_rate,  // 采样率
+                                 0, nullptr);
     // 初始化 重采样上下文
     swr_init(swr_ctx);
 }
@@ -70,30 +71,30 @@ void AudioChannel::stop() {
 void *task_audio_decode(void *args) {
     auto *audio_channel = static_cast<AudioChannel *>(args);
     audio_channel->audio_decode();
-    return 0;
+    return nullptr;
 }
 
 void *task_audio_play(void *args) {
     auto *audio_channel = static_cast<AudioChannel *>(args);
     audio_channel->audio_play();
-    return 0;
+    return nullptr;
 }
 
 // 视频：1.解码    2.播放
 // 1.把队列里面的压缩包(AVPacket *)取出来，然后解码成（AVFrame * ）原始包 ----> 保存队列
 // 2.把队列里面的原始包(AVFrame *)取出来， 播放
 void AudioChannel::start() {
-    isPlaying = 1;
+    isPlaying = true;
 
     //队列开始工作了
     packets.setWork(1);
     frames.setWork(1);
 
     //第一个线程：视频，取出队列的压缩包，进行编码，编码后的原始包再push到队列中
-    pthread_create(&pid_audio_decode, 0, task_audio_decode, this);
+    pthread_create(&pid_audio_decode, nullptr, task_audio_decode, this);
 
     //第二个线程：视频，取出队列的原始包，播放
-    pthread_create(&pid_audio_play, 0, task_audio_play, this);
+    pthread_create(&pid_audio_play, nullptr, task_audio_play, this);
 }
 
 
@@ -105,10 +106,17 @@ void AudioChannel::start() {
  * 4）原始包放入队列
  *
  * 和视频解码流程一致，拿到原始包
+ * TODO:第五节课 - 内存泄漏关键点（控制frames队列大小，等待队列中的数据被消费） - 3
  * */
 void AudioChannel::audio_decode() {
     AVPacket *pkt = nullptr;
     while (isPlaying) {
+        //3.1 内存泄漏点
+        if(isPlaying && frames.size() > 100){
+            av_usleep(10 * 1000);
+            continue;
+        }
+
         //Step1：
         int ret = packets.getQueueAndDel(pkt);  //阻塞式函数
         if (!isPlaying) {
@@ -122,7 +130,7 @@ void AudioChannel::audio_decode() {
         //1.发送pkt（压缩包）到缓冲区   2.从缓冲区拿出（原始包）
         ret = avcodec_send_packet(codecContext, pkt);
         //FFmpeg源码缓存一份pkt，所以我们的pkt可以在这释放了
-        releaseAVPacket(&pkt);
+        //releaseAVPacket(&pkt);
         if (ret) {
             break;  // avcodec_send_packet 出现了错误
         }
@@ -135,13 +143,23 @@ void AudioChannel::audio_decode() {
             // 有可能音频帧，也会获取失败，重新拿一次
             continue;
         } else if (ret != 0) {
+            // TODO 第五节课 解码音频的frame出错，防止你在堆区开辟了控件，马上释放 3.2 内存泄漏点
+            if (frame){
+                releaseAVFrame(&frame);
+            }
             break;  //错误了
         }
-
         //step4:原始包放入队列
         frames.insertToQueue(frame);
+
+        // TODO 第五节课 内存泄漏点 5
+        // 安心释放pkt本身空间释放 和 pkt成员指向的空间释放
+        av_packet_unref(pkt); // 减1 = 0 释放成员指向的堆区
+        releaseAVPacket(&pkt); // 释放AVPacket * 本身的堆区空间
     }
-    releaseAVPacket(&pkt);
+    // TODO 第五节课 内存泄漏点 5.1
+    av_packet_unref(pkt);     // 减1 = 0 释放成员指向的堆区
+    releaseAVPacket(&pkt);  // 释放AVPacket * 本身的堆区空间
 }
 
 
@@ -158,7 +176,7 @@ void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *args) {
             bq,     // 传递自己，为什么（因为没有this，为什么没有this，因为不是C++对象，所以需要传递自己） JNI讲过了
             audio_channel->out_buffers,  // PCM数据
             pcm_size  // PCM数据对应的大小，缓冲区大小怎么定义？（复杂）
-            );
+    );
 }
 
 /**
@@ -172,10 +190,10 @@ int AudioChannel::getPCM() {
     //获取PCM数据
     //PCM数据在哪里？答：队列frames队列中 frame->data == PCM数据（待 重采样 32bit）
 
-    AVFrame *frame = 0;
-    while (isPlaying){
+    AVFrame *frame = nullptr;
+    while (isPlaying) {
         int ret = frames.getQueueAndDel(frame);
-        if (!isPlaying){
+        if (!isPlaying) {
             break;   // 如果关闭了播放，跳出循环，releaseAVPacket(&pkt);
         }
         if (!ret) { // ret == 0
@@ -186,7 +204,8 @@ int AudioChannel::getPCM() {
 
         // 来源：10个48000   ---->  目标:44100  11个44100
         // 获取单通道的样本数 (计算目标样本数： ？ 10个48000 --->  48000/44100因为除不尽  11个44100)
-        int dst_nb_samples = av_rescale_rnd(swr_get_delay(swr_ctx, frame->sample_rate) + frame->nb_samples, // 获取下一个输入样本相对于下一个输出样本将经历的延迟
+        int dst_nb_samples = av_rescale_rnd(swr_get_delay(swr_ctx, frame->sample_rate) +
+                                            frame->nb_samples, // 获取下一个输入样本相对于下一个输出样本将经历的延迟
                                             out_sample_rate, // 输出采样率
                                             frame->sample_rate, // 输入采样率
                                             AV_ROUND_UP); // 先上取 取去11个才能容纳的上
@@ -205,7 +224,8 @@ int AudioChannel::getPCM() {
                                               frame->nb_samples); // 输入的样本数
 
         // 由于out_buffers 和 dst_nb_samples 无法对应，所以需要重新计算
-        pcm_data_size = samples_per_channel * out_sample_size * out_channels; // 941通道样本数  *  2样本格式字节数  *  2声道数  =3764
+        pcm_data_size = samples_per_channel * out_sample_size *
+                        out_channels; // 941通道样本数  *  2样本格式字节数  *  2声道数  =3764
 
         // 单通道样本数:1024  * 2声道  * 2(16bit)  =  4,096
 
@@ -221,6 +241,11 @@ int AudioChannel::getPCM() {
     // 样本数 = 采样率 * 声道数 * 位声
 
     // 双声道的样本数？  答： （采样率 * 声道数 * 位声） * 2
+
+    // TODO 第五节课 内存泄漏点 7
+    av_frame_unref(frame);
+    releaseAVFrame(&frame);
+
     return pcm_data_size;
 }
 

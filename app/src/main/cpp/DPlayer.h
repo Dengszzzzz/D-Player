@@ -15,6 +15,7 @@
 // ffmpeg是纯c写的，必须采用c的编译方式，否则奔溃
 extern "C" {
 #include "libavformat/avformat.h"
+#include <libavutil/time.h>
 };
 
 

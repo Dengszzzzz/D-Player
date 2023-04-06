@@ -52,10 +52,17 @@ void VideoChannel::start() {
  * 2) 发送压缩包到缓存区
  * 3）从缓存区获取原始包
  * 4）原始包放入队列
+ *
+ * TODO:第五节课 - 内存泄漏关键点（控制frames队列大小，等待队列中的数据被消费） - 2
  * */
 void VideoChannel::video_decode() {
     AVPacket *pkt = 0;
     while (isPlaying){
+        //2.1 内存泄漏点 原始包队列>100时，暂停放入压缩包队列
+        if (isPlaying && frames.size() > 100){
+            av_usleep(10 * 1000);
+            continue;
+        }
         //Step1：
         int ret = packets.getQueueAndDel(pkt);  //阻塞式函数
         if (!isPlaying){
@@ -69,7 +76,7 @@ void VideoChannel::video_decode() {
         //1.发送pkt（压缩包）到缓冲区   2.从缓冲区拿出（原始包）
         ret = avcodec_send_packet(codecContext,pkt);
         //FFmpeg源码缓存一份pkt，所以我们的pkt可以在这释放了
-        releaseAVPacket(&pkt);
+        //releaseAVPacket(&pkt);
         if (ret){
             break;  // avcodec_send_packet 出现了错误
         }
@@ -81,13 +88,24 @@ void VideoChannel::video_decode() {
             //B帧，B帧参考前面成功，B帧参考后面失败，可能是P帧没有出来，再拿一次即可。
             continue;
         } else if (ret !=0){
+            // TODO 第五节课 解码视频的frame出错，马上释放，防止你在堆区开辟了空间 2.1 内存泄漏点
+            if (frame){
+                releaseAVFrame(&frame);
+            }
             break;  //错误了
         }
 
         //step4:原始包放入队列
         frames.insertToQueue(frame);
+
+        // TODO 第五节课 内存泄漏点 4
+        // 安心释放pkt本身空间释放 和 pkt成员指向的空间释放
+        av_packet_unref(pkt); // 减1 = 0 释放成员指向的堆区
+        releaseAVPacket(&pkt); // 释放AVPacket * 本身的堆区空间
     }
-    releaseAVPacket(&pkt);
+    // TODO 第五节课 内存泄漏点 4.1
+    av_packet_unref(pkt); // 减1 = 0 释放成员指向的堆区
+    releaseAVPacket(&pkt); // 释放AVPacket * 本身的堆区空间
 }
 
 // 2.把队列里面的原始包(AVFrame *)取出来， 播放 【真正干活的就是他】
@@ -142,11 +160,18 @@ void VideoChannel::video_play() {
 
         //基础：数组被传递会退化成指针，默认就是第一个元素  Fixme：为什么最后一个参数是int而不是int*？
         renderCallback(dst_data[0],codecContext->width,codecContext->height,dst_linesize[0]);
-        releaseAVFrame(&frame);  //释放原始包，此时已经被渲染完，没用了
+        //releaseAVFrame(&frame);  //释放原始包，此时已经被渲染完，没用了
+
+        // TODO 第五节课 内存泄漏点 6
+        av_frame_unref(frame); // 减1 = 0 释放成员指向的堆区
+        releaseAVFrame(&frame); // 释放AVFrame * 本身的堆区空间
     }
-    //出现错误，所退出的循环，都要释放frame
+    // 简单的释放
+    // releaseAVFrame(&frame); // 出现错误，所退出的循环，都要释放frame
+    // TODO 第五节课 内存泄漏点 6.1
+    av_frame_unref(frame);
     releaseAVFrame(&frame);
-    isPlaying = 0;
+    isPlaying = false;
     av_free(&dst_data);
     sws_freeContext(sws_ctx);  // free(sws_ctx); FFmpeg必须使用人家的函数释放，直接崩溃
 }
