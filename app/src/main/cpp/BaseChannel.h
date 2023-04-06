@@ -17,8 +17,10 @@ public:
     bool isPlaying;       //音频 和 视频 都会有的标记 是否播放
     AVCodecContext *codecContext = 0;   //音频 和 视频都需要的 解码器上下文
 
-    BaseChannel(int streamIndex, AVCodecContext *codecContext) : stream_index(streamIndex),
-                                                                 codecContext(codecContext) {
+    AVRational time_base;   //TODO 音视频同步 2.1 （AudioChannel VideoChannel 都需要时间基）单位而已
+
+    BaseChannel(int streamIndex, AVCodecContext *codecContext, AVRational time_base)
+    : stream_index(streamIndex),codecContext(codecContext), time_base(time_base) {
         packets.setReleaseCallback(releaseAVPacket);  //给队列设置Callback，Callback释放队列里面的数据
         frames.setReleaseCallback(releaseAVFrame);
     }

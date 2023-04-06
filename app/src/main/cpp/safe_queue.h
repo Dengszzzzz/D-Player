@@ -15,6 +15,7 @@ private:
     //该函数有一个泛型参数，传的是地址，返回void类型。
     //则ReleaseCallback类型的对象可以指向任何符合上述规则的函数
     typedef void (*ReleaseCallback)(T *);
+    typedef void (*SyncCallback)(queue<T> &);  //函数指针定义 做回调 让外界完成丢包动作
 
 private:
     queue<T> queue;  //定义队列
@@ -22,6 +23,7 @@ private:
     pthread_cond_t cond;   //条件变量，为了实现 等待-唤醒功能（不允许有野指针）
     int work;    //标记队列是否工作
     ReleaseCallback releaseCallback;
+    SyncCallback syncCallback;
 
 public:
     SafeQueue() {
@@ -124,6 +126,22 @@ public:
      */
     void setReleaseCallback(ReleaseCallback releaseCallback){
         this->releaseCallback = releaseCallback;
+    }
+
+    /**
+     * 设置此函数指针的回调，让外界去释放
+     * */
+    void setSyncCallback(SyncCallback syncCallback){
+        this->syncCallback = syncCallback;
+    }
+
+    /**
+     * 同步操作，丢包
+     * */
+    void sync(){
+        pthread_mutex_lock(&mutex);
+        syncCallback(queue);   // 函数指针 具体丢包动作，让外界完成
+        pthread_mutex_unlock(&mutex);
     }
 };
 

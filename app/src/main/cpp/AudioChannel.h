@@ -44,8 +44,10 @@ public:
     // 播放器队列接口
     SLAndroidSimpleBufferQueueItf bqPlayerBufferQueue = 0;
 
+    double audio_time;  //TODO 音视频同步 1.1
+
 public:
-    AudioChannel(int streamIndex, AVCodecContext *codecContext);
+    AudioChannel(int streamIndex, AVCodecContext *codecContext,AVRational time_base);
     ~AudioChannel();
     void stop();
     void start();

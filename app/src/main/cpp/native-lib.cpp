@@ -102,6 +102,12 @@ Java_com_dzh_d_1player_DPlayer_prepareNative(JNIEnv *env, jobject thiz, jstring 
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_dzh_d_1player_DPlayer_startNative(JNIEnv *env, jobject thiz) {
+
+    //模拟奔溃，在高版本Android系统中，通过Debug app 可以打断点定位到这。
+/*    AudioChannel* aaa = nullptr;
+    int count = aaa->frames.size();
+    LOGE("位置：count = %c\n",count);*/
+
     if (player) {
         player->start();
     }

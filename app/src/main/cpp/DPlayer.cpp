@@ -87,17 +87,17 @@ void DPlayer::prepare_() {
     /**
      * TODO 第三步：根据流信息，流的个数，用循环来找
      */
-    for (int i = 0; i < formatContext->nb_streams; ++i) {
+    for (int stream_index = 0; stream_index < formatContext->nb_streams; ++stream_index) {
         /**
          * TODO 第四步：获取媒体流（视频，音频）
          */
-        AVStream *avStream = formatContext->streams[i];
+        AVStream *stream = formatContext->streams[stream_index];
 
         /**
         * TODO 第五步：从上面的流中 获取 编码解码的【参数】
         * 由于：后面的编码器 解码器 都需要参数（宽高 等等）
         */
-        AVCodecParameters *parameters = avStream->codecpar;
+        AVCodecParameters *parameters = stream->codecpar;
 
         /**
          * TODO 第六步：（根据上面的【参数】）获取编解码器
@@ -142,13 +142,24 @@ void DPlayer::prepare_() {
             return;
         }
 
+        //Todo 音视频同步 2
+        AVRational time_base = stream->time_base;
+
         /**
          * TODO 第十步：从编解码器参数中，获取流的类型 codec_type  ===  音频 视频
          */
         if (parameters->codec_type == AVMediaType::AVMEDIA_TYPE_AUDIO) { // 音频
-            audio_channel = new AudioChannel(i,codeContext);
+            audio_channel = new AudioChannel(stream_index,codeContext,time_base);
         } else if (parameters->codec_type == AVMediaType::AVMEDIA_TYPE_VIDEO) { // 视频
-            video_channel = new VideoChannel(i,codeContext);
+            //虽然是视频类型，但是只有一帧封面
+            if (stream->disposition & AV_DISPOSITION_ATTACHED_PIC){
+                continue;
+            }
+            //TODO:音视频同步 2.2 （视频独有的 fps值）
+            AVRational fps_rational = stream->avg_frame_rate;
+            int fps = av_q2d(fps_rational);
+
+            video_channel = new VideoChannel(stream_index,codeContext,time_base,fps);
             video_channel->setRenderCallback(renderCallback);
         }
     } // for end
@@ -254,6 +265,8 @@ void DPlayer::start() {
     // 1.把队列里面的压缩包(AVPacket *)取出来，然后解码成（AVFrame * ）原始包 ----> 保存队列
     // 2.把队列里面的原始包(AVFrame *)取出来， 播放
     if (video_channel){
+        //TODO 音视频同步 3.1
+        video_channel->setAudioChannel(audio_channel);
         video_channel->start();
     }
     if (audio_channel) {

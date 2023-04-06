@@ -4,8 +4,8 @@
 
 #include "AudioChannel.h"
 
-AudioChannel::AudioChannel(int streamIndex, AVCodecContext *codecContext)
-        : BaseChannel(streamIndex, codecContext) {
+AudioChannel::AudioChannel(int streamIndex, AVCodecContext *codecContext, AVRational time_base)
+        : BaseChannel(streamIndex, codecContext,time_base) {
 
     // 音频三要素
     /*
@@ -228,6 +228,17 @@ int AudioChannel::getPCM() {
                         out_channels; // 941通道样本数  *  2样本格式字节数  *  2声道数  =3764
 
         // 单通道样本数:1024  * 2声道  * 2(16bit)  =  4,096
+
+        //TODO 音视频同步 1
+        //时间基TimeBase理解：fps25：代表一秒钟25帧。那么每一帧 == 1/25 = 0.04s/fp，而这0.04就是时间基概念
+        //frame->best_effort_timestamp  //时间有单位，微秒、毫秒、秒等，但是在FFmpeg里面有自己的单位（时间基 TimeBase）
+        /*typedef struct AVRational{
+            int num; ///< Numerator
+            int den; ///< Denominator
+        } AVRational;
+         */
+
+        audio_time = frame->best_effort_timestamp * av_q2d(time_base);  //必须这样计算后，才能拿到真正的时间戳
 
         break; // 利用while循环 来写我们的逻辑
     }
